@@ -101,7 +101,7 @@
               </n-button>
               <n-button
                 size="large"
-                @click="router.push('/tokens')"
+                @click="router.push('/tokens?force=true')"
               >
                 管理Token
               </n-button>

@@ -109,6 +109,32 @@ const router = createRouter({
   }
 })
 
+// // 导航守卫
+// router.beforeEach((to, from, next) => {
+//   const tokenStore = useTokenStore()
+  
+//   // 设置页面标题
+//   document.title = to.meta.title ? `${to.meta.title} - XYZW 游戏管理系统` : 'XYZW 游戏管理系统'
+  
+//   // 检查是否需要Token
+//   if (to.meta.requiresToken && !tokenStore.hasTokens) {
+//     next('/tokens')
+//   } else if (to.name === 'TokenImport' && tokenStore.hasTokens && tokenStore.selectedToken) {
+//     // 如果已有token且已选择，重定向到控制台
+//     next('/dashboard')
+//   } else if (to.path === '/' && tokenStore.hasTokens) {
+//     // 首页重定向逻辑
+//     if (tokenStore.selectedToken) {
+//       next('/dashboard')
+//     } else {
+//       next('/tokens')
+//     }
+//   } else {
+//     next()
+//   }
+// })
+
+
 // 导航守卫
 router.beforeEach((to, from, next) => {
   const tokenStore = useTokenStore()
@@ -119,8 +145,8 @@ router.beforeEach((to, from, next) => {
   // 检查是否需要Token
   if (to.meta.requiresToken && !tokenStore.hasTokens) {
     next('/tokens')
-  } else if (to.name === 'TokenImport' && tokenStore.hasTokens && tokenStore.selectedToken) {
-    // 如果已有token且已选择，重定向到控制台
+  } else if (to.name === 'TokenImport' && tokenStore.hasTokens && tokenStore.selectedToken && !to.query.force) {
+    // 如果已有token且已选择，重定向到控制台（除非带有force参数）
     next('/dashboard')
   } else if (to.path === '/' && tokenStore.hasTokens) {
     // 首页重定向逻辑
