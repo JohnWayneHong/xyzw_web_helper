@@ -86,6 +86,7 @@ export function registerDefaultCommands(reg) {
     .register("system_getdatabundlever", { isAudit: false })
     .register("system_buygold", { buyNum: 1 })
     .register("system_claimhangupreward")
+    .register("system_mysharecallback")
     .register("system_signinreward")
 
     // 任务相关
