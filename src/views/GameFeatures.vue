@@ -30,8 +30,7 @@
     <div
       v-if="showFeedback"
       class="feedback-section"
-    >
-    </div>
+    />
 
     <!-- 功能模块网格 -->
     <div class="features-grid-section">
@@ -110,6 +109,10 @@ const connectionStatusText = computed(() => {
 
 const connectionClass = computed(() => {
   return connectionStatus.value === 'connected' ? 'status-connected' : 'status-disconnected'
+})
+
+const isConnected = computed(() => {
+  return connectionStatus.value === 'connected'
 })
 
 // 方法
@@ -256,7 +259,7 @@ const initializeGameData = async () => {
     
     // 获取队伍信息
     console.log('🎮 正在获取队伍信息...')
-    const teamResult = tokenStore.sendMessage(tokenId, 'presetteam_getteam')
+    const teamResult = tokenStore.sendMessage(tokenId, 'presetteam_getinfo')
     console.log('🎮 队伍信息请求结果:', teamResult)
     
     console.log('🎮 游戏数据初始化请求已发送')
@@ -276,9 +279,14 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
 }
 
+/* 深色主题下背景 */
+[data-theme="dark"] .game-features-page {
+  background: linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
+}
+
 // 页面头部
 .page-header {
-  background: white;
+  background: var(--bg-primary);
   border-bottom: 1px solid var(--border-light);
   padding: var(--spacing-lg) 0;
 }
@@ -345,7 +353,7 @@ onUnmounted(() => {
 }
 
 .feature-card {
-  background: white;
+  background: var(--bg-primary);
   border-radius: var(--border-radius-xl);
   padding: var(--spacing-lg);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -479,7 +487,7 @@ onUnmounted(() => {
 }
 
 .ws-status-card {
-  background: white;
+  background: var(--bg-primary);
   border-radius: var(--border-radius-large);
   padding: var(--spacing-lg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);

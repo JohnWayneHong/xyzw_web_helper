@@ -21,10 +21,12 @@
 ## ✨ 核心特性
 
 ### 🔐 Token管理系统
+- **双重导入方式**：支持手动输入和URL接口获取两种Token导入方式
 - **Base64解码支持**：自动识别和解析多种Base64格式的游戏Token
 - **多角色管理**：同时管理多个游戏账号，支持角色信息展示
 - **本地存储**：安全的本地数据存储，无需后端服务器
 - **Token验证**：自动验证Token有效性和格式完整性
+- **自动刷新**：支持URL获取的Token自动刷新功能
 
 ### 🌐 WebSocket通信
 - **BON协议支持**：内置Binary Object Notation协议编解码
@@ -42,6 +44,13 @@
 - **消息测试器**：BON协议消息编码/解码测试工具
 - **WebSocket调试**：实时WebSocket连接和消息调试
 - **协议验证**：游戏协议消息格式验证工具
+
+### 🎨 主题系统
+- **智能主题切换**：支持深浅主题无缝切换，自动适应系统主题偏好
+- **实时响应**：主题切换立即生效，无需刷新页面
+- **全组件覆盖**：完整支持Naive UI组件库的深色主题
+- **记忆偏好**：自动保存用户主题选择，下次访问自动应用
+- **统一设计**：所有页面使用统一的圆形主题切换按钮
 
 ---
 
@@ -79,6 +88,9 @@ src/
 │   ├── gameRoles.js       # 游戏角色数据
 │   └── localTokenManager.js # 本地存储管理
 │
+├── 🔧 composables/         # Vue 3组合式函数
+│   └── useTheme.js        # 主题管理系统
+│
 ├── 🌐 utils/               # 核心工具库
 │   ├── bonProtocol.js     # BON协议实现
 │   ├── xyzwWebSocket.js   # WebSocket客户端
@@ -94,6 +106,7 @@ src/
 │
 └── 🧩 components/         # 可复用组件
     ├── TokenManager.vue   # Token管理器
+    ├── ThemeToggle.vue    # 主题切换按钮
     ├── GameStatus.vue     # 游戏状态组件
     ├── DailyTaskCard.vue  # 任务卡片
     ├── MessageTester.vue  # 消息测试器
@@ -147,10 +160,12 @@ npm run format   # 代码格式化
 
 ### 1. Token导入与管理
 
-#### 支持的Token格式
+#### 支持的导入方式
+
+##### 方式一：手动输入
+支持多种Base64格式的Token字符串：
+
 ```javascript
-
-
 // 纯Base64格式
 "eyJ0b2tlbiI6ImFiY2QxMjM0In0="
 
@@ -158,12 +173,31 @@ npm run format   # 代码格式化
 "token:eyJ0b2tlbiI6ImFiY2QxMjM0In0="
 ```
 
+##### 方式二：URL接口获取
+通过API接口自动获取Token，支持定时刷新：
+
+```javascript
+// API接口返回格式
+{
+  "token": "eyJ0b2tlbiI6ImFiY2QxMjM0In0=",  // 必需字段
+  "server": "风云服"                        // 可选字段
+}
+```
+
 #### 导入步骤
 1. 进入 **Token管理** 页面
-2. 选择导入方式（文件上传/文本粘贴/手动输入）
+2. 选择导入方式：
+   - **手动输入**：粘贴Base64编码的Token字符串
+   - **URL获取**：输入Token获取接口地址
 3. 系统自动解析和验证Token格式
 4. 设置角色名称和基本信息
 5. 保存到本地存储
+
+#### Token刷新功能
+- 通过URL方式导入的Token支持一键刷新
+- 刷新时会重新请求原API接口获取最新Token
+- 自动重新建立WebSocket连接
+- 保持角色信息和配置不变
 
 ### 2. WebSocket连接配置
 
@@ -182,7 +216,26 @@ const encoded = bon.encode(message.body);
 const decoded = bon.decode(receivedData);
 ```
 
-### 4. 游戏功能使用
+### 4. 主题系统使用
+
+#### 主题切换功能
+- **位置**：在页面右上角可以找到圆形的主题切换按钮
+- **图标说明**：
+  - ☀️ 太阳图标：当前为浅色主题，点击切换到深色主题
+  - 🌙 月亮图标：当前为深色主题，点击切换到浅色主题
+- **自动记忆**：用户的主题选择会自动保存，下次访问时自动应用
+- **系统同步**：首次访问时会自动检测系统主题偏好
+
+#### 技术实现特点
+```javascript
+// 使用主题切换组件
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import { useTheme } from '@/composables/useTheme'
+
+const { isDark, toggleTheme } = useTheme()
+```
+
+### 5. 游戏功能使用
 
 #### 日常任务自动化
 - 自动签到奖励领取
@@ -429,7 +482,34 @@ git push origin feature/new-feature
 
 ## 📋 更新日志
 
-### v2.0.0 (Current)
+### v2.1.0 (Current - 2025.09.04)
+- 🌓 **全新主题系统**
+  - 全局深浅主题切换功能，支持系统主题自动检测
+  - 优雅的圆形切换按钮，与界面设计完美融合
+  - 实时热切换，无需刷新页面即可切换主题
+  - 完整支持Naive UI组件的深色主题
+  - 智能记忆用户主题偏好设置
+
+- ⚡ **响应式体验优化**
+  - 修复主题切换按钮状态不实时更新的问题
+  - 解决弹框等Portal组件字体颜色不热切换的问题
+  - 基于MutationObserver的DOM变化监听
+  - 事件驱动的主题状态同步机制
+
+- 🎨 **界面统一性提升**
+  - 统一TokenImport和Dashboard页面的主题切换组件
+  - 使用太阳/月亮图标直观表示主题状态
+  - 添加按钮hover动画效果
+  - 完善的CSS深色主题适配
+
+- 🔧 **技术架构改进**
+  - 重构useTheme composable，使用响应式ref替代computed
+  - 双重DOM监听确保状态同步（html + body）
+  - 支持data-theme属性和class类名双重主题检测
+  - 优化的事件系统和状态管理
+  - 修复若干脚本错误
+
+### v2.0.0 (Legacy)
 - 🎉 重构Token管理系统，支持多角色管理
 - 🔧 升级WebSocket客户端，支持更多游戏协议
 - 🎨 全新UI设计，基于Naive UI组件库
@@ -443,6 +523,35 @@ git push origin feature/new-feature
 - 基础游戏功能支持
 
 ---
+
+## 🗓️ 版本更新计划
+
+### v2.2.0 (计划中 - Q1 2026)
+- 🎯 **自动化增强**
+  - [ ] 智能任务调度系统
+  - [ ] 增加账号批量管理界面
+  - [ ] 支持每日任务一键完成
+  - [ ] 支持定时任务抢购符咒
+
+- 🔧 **功能扩展**  
+  - [ ] 支持自定义脚本生成
+  - [ ] 添加数据统计面板
+  - [ ] 增强游戏状态监控
+  - [ ] 支持多服务器管理
+
+### v2.1.0 已完成功能 ✅
+- 🎨 **用户界面**
+  - [x] 全局深浅主题切换系统
+  - [x] 实时热切换，无需刷新页面
+  - [x] 优雅的圆形主题切换按钮
+  - [x] 完整的Naive UI深色主题支持
+  - [x] 界面已有bug修复
+
+- 🔧 **技术优化**
+  - [x] 支持远端获取Token（URL接口方式）
+  - [x] 支持Token自动刷新功能
+  - [x] 响应式状态管理优化
+  - [x] DOM变化监听和事件驱动更新
 
 ## 📄 许可证
 
@@ -461,7 +570,7 @@ git push origin feature/new-feature
 
 - **项目主页**：[GitHub Repository](https://github.com/w1249178256/xyzw_web_helper)
 - **问题反馈**：[GitHub Issues](https://github.com/w1249178256/xyzw_web_helper/issues)
-- **联系邮箱**：[MAIL](stevefeng59@gmail.com)
+- **联系邮箱**：[发邮件给我](mailto:stevefeng59@gmail.com)
 
 ---
 

@@ -267,6 +267,77 @@ const bulkActionOptions = [
   }
 ]
 
+// 等待WebSocket连接并加载阵容数据
+const loadTeamDataWithConnection = async (tokenId, maxRetries = 3, retryDelay = 2000) => {
+  console.log('每日页面进入，开始检查WebSocket连接状态...')
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 检查WebSocket连接状态
+      const wsStatus = tokenStore.getWebSocketStatus(tokenId)
+      console.log(`第${attempt}次检查，WebSocket状态:`, wsStatus)
+      
+      if (wsStatus !== 'connected') {
+        console.log('WebSocket未连接，尝试建立连接...')
+        
+        // 尝试建立WebSocket连接
+        const tokenData = tokenStore.gameTokens.find(t => t.id === tokenId)
+        if (tokenData && tokenData.token) {
+          // 触发WebSocket连接
+          tokenStore.createWebSocketConnection(tokenId, tokenData.token, tokenData.wsUrl)
+          
+          // 等待连接建立
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          
+          // 再次检查连接状态
+          const newStatus = tokenStore.getWebSocketStatus(tokenId)
+          if (newStatus !== 'connected') {
+            if (attempt < maxRetries) {
+              console.log(`连接未建立，${retryDelay / 1000}秒后重试...`)
+              continue
+            } else {
+              throw new Error('WebSocket连接超时')
+            }
+          }
+        } else {
+          throw new Error('未找到有效的Token数据或WebSocket URL')
+        }
+      }
+      
+      // WebSocket已连接，开始加载阵容数据
+      console.log('WebSocket已连接，开始加载阵容数据...')
+      const result = await tokenStore.sendMessageWithPromise(
+        tokenId, 
+        'presetteam_getinfo', 
+        {}, 
+        8000
+      )
+      
+      if (result) {
+        // 更新到游戏数据缓存中
+        tokenStore.$patch((state) => {
+          state.gameData = { ...(state.gameData ?? {}), presetTeam: result }
+        })
+        console.log('阵容数据加载成功:', result)
+        message.success('阵容数据已更新')
+        return result
+      }
+      
+    } catch (error) {
+      console.error(`第${attempt}次尝试失败:`, error)
+      
+      if (attempt < maxRetries) {
+        console.log(`${retryDelay / 1000}秒后进行第${attempt + 1}次重试...`)
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+      } else {
+        console.error('所有重试均失败，阵容数据加载失败')
+        message.warning(`阵容数据加载失败: ${error.message || '未知错误'}`)
+        return null
+      }
+    }
+  }
+}
+
 // 方法
 const refreshTasks = async () => {
   if (!selectedRoleId.value) {
@@ -567,6 +638,11 @@ onMounted(async () => {
     await gameRolesStore.fetchGameRoles()
   }
 
+  // 页面进入时手动调用阵容加载接口，确保WebSocket连接后再调用
+  if (tokenStore.selectedToken) {
+    await loadTeamDataWithConnection(tokenStore.selectedToken.id)
+  }
+
   // 设置默认选中的角色
   if (gameRolesStore.selectedRole) {
     selectedRoleId.value = gameRolesStore.selectedRole.id
@@ -602,10 +678,20 @@ watch(() => gameRolesStore.selectedRole, (newRole) => {
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
 }
 
+/* 深色主题下背景 */
+[data-theme="dark"] .daily-tasks-page {
+  background: linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
+}
+
 .page-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: var(--spacing-xl) 0;
   color: white;
+}
+
+/* 深色主题下头部渐变 */
+[data-theme="dark"] .page-header {
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
 }
 
 .header-content {
@@ -637,7 +723,7 @@ watch(() => gameRolesStore.selectedRole, (newRole) => {
 }
 
 .role-selector-section {
-  background: white;
+  background: var(--bg-primary);
   padding: var(--spacing-lg) 0;
   border-bottom: 1px solid var(--border-light);
 }
@@ -678,7 +764,7 @@ watch(() => gameRolesStore.selectedRole, (newRole) => {
 }
 
 .filter-section {
-  background: white;
+  background: var(--bg-primary);
   padding: var(--spacing-md) 0;
   border-bottom: 1px solid var(--border-light);
 }

@@ -2,14 +2,22 @@
   <div class="tower-status-card">
     <div class="card-header">
       <div class="header-info">
-        <img src="/icons/1733492491706148.png" alt="爬塔图标" class="tower-icon">
+        <img
+          src="/icons/1733492491706148.png"
+          alt="爬塔图标"
+          class="tower-icon"
+        >
         <div class="tower-info">
           <h3>咸将塔</h3>
           <p>一个不小心就过了</p>
         </div>
       </div>
       <div class="energy-display">
-        <img src="/icons/xiaoyugan.png" alt="小鱼干" class="energy-icon">
+        <img
+          src="/icons/xiaoyugan.png"
+          alt="小鱼干"
+          class="energy-icon"
+        >
         <span class="energy-count">{{ towerEnergy }}</span>
       </div>
     </div>
@@ -33,71 +41,70 @@
         :disabled="!canClimb"
         @click="startTowerClimb"
       >
-        开始爬塔
+        {{ isClimbing.value ? '爬塔中...' : '开始爬塔' }}
+      </button>
+
+      <!-- 调试用的重置按钮，只在开发环境显示 -->
+      <button
+        v-if="isClimbing.value"
+        class="reset-button"
+        @click="resetClimbingState"
+      >
+        重置状态
       </button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { useTokenStore } from '@/stores/tokenStore'
-import { useMessage } from 'naive-ui'
+import {computed, onMounted, ref, watch} from 'vue'
+import {useTokenStore} from '@/stores/tokenStore'
+import {useMessage} from 'naive-ui'
 
 const tokenStore = useTokenStore()
 const message = useMessage()
 
 // 响应式数据
 const isClimbing = ref(false)
+const climbTimeout = ref(null) // 用于超时重置状态
+const lastClimbResult = ref(null) // 最后一次爬塔结果
 
 // 计算属性 - 从gameData中获取塔相关信息
 const roleInfo = computed(() => {
   const data = tokenStore.gameData?.roleInfo || null
-  console.log('🗼 TowerStatus roleInfo 计算属性更新:', data)
-  if (data?.role?.tower) {
-    console.log('🗼 TowerStatus 发现tower数据:', data.role.tower)
-  } else {
-    console.log('🗼 TowerStatus 没有找到tower数据, gameData:', tokenStore.gameData)
-  }
   return data
 })
 
 const currentFloor = computed(() => {
   const tower = roleInfo.value?.role?.tower
-  console.log('🗼 TowerStatus currentFloor 计算属性更新')
-  console.log('🗼 TowerStatus 输入的tower数据:', tower)
-  console.log('🗼 TowerStatus 完整的roleInfo:', roleInfo.value)
+
 
   if (!tower) {
-    console.log('🗼 没有tower对象，显示默认值')
     return "0 - 0"
   }
 
   if (!tower.id && tower.id !== 0) {
-    console.log('🗼 没有塔ID或ID无效，显示默认值, tower.id:', tower.id)
     return "0 - 0"
   }
 
   const towerId = tower.id
   const floor = Math.floor(towerId / 10) + 1
   const layer = towerId % 10 + 1
-  const result = `${floor} - ${layer}`
-  console.log(`🗼 计算层数: towerId=${towerId} -> floor=${floor}, layer=${layer} -> ${result}`)
-  return result
+  return `${floor} - ${layer}`
 })
 
 const towerEnergy = computed(() => {
   const tower = roleInfo.value?.role?.tower
-  console.log('🗼 TowerStatus towerEnergy 计算属性更新')
-  console.log('🗼 TowerStatus tower对象:', tower)
-  
+
+
   const energy = tower?.energy || 0
-  console.log('🗼 TowerStatus 计算出的energy:', energy)
   return energy
 })
 
 const canClimb = computed(() => {
-  return towerEnergy.value > 0 && !isClimbing.value
+  const hasEnergy = towerEnergy.value > 0
+  const notClimbing = !isClimbing.value
+  return hasEnergy && notClimbing
 })
 
 // 方法
@@ -112,11 +119,23 @@ const startTowerClimb = async () => {
     return
   }
 
-  try {
-    isClimbing.value = true
-    const tokenId = tokenStore.selectedToken.id
+  // 清除之前的超时
+  if (climbTimeout.value) {
+    clearTimeout(climbTimeout.value)
+    climbTimeout.value = null
+  }
 
-    message.info('开始爬塔挑战...')
+  // 确保在操作开始前设置状态
+  isClimbing.value = true
+
+  // 设置超时保护，15秒后自动重置状态
+  climbTimeout.value = setTimeout(() => {
+    isClimbing.value = false
+    climbTimeout.value = null
+  }, 15000)
+
+  try {
+    const tokenId = tokenStore.selectedToken.id
 
     // 发送爬塔命令
     await tokenStore.sendMessageWithPromise(tokenId, 'fight_starttower', {}, 10000)
@@ -124,21 +143,43 @@ const startTowerClimb = async () => {
     message.success('爬塔命令已发送')
 
     // 立即查询塔信息以获取最新状态
-    console.log('🗼 爬塔完成，立即查询塔信息')
     await getTowerInfo()
 
     // 再延迟查询一次确保数据同步
     setTimeout(async () => {
-      console.log('🗼 延迟查询塔信息')
       await getTowerInfo()
-    }, 3000)
+
+      // 清除超时并重置状态
+      if (climbTimeout.value) {
+        clearTimeout(climbTimeout.value)
+        climbTimeout.value = null
+      }
+      isClimbing.value = false
+    }, 2000)
 
   } catch (error) {
-    console.error('爬塔失败:', error)
     message.error('爬塔失败: ' + (error.message || '未知错误'))
-  } finally {
+
+    // 发生错误时立即重置状态
+    if (climbTimeout.value) {
+      clearTimeout(climbTimeout.value)
+      climbTimeout.value = null
+    }
     isClimbing.value = false
   }
+
+  // 注意：不要在这里设置 isClimbing.value = false
+  // 因为我们要等待延迟查询完成后再重置状态
+}
+
+// 重置爬塔状态的方法
+const resetClimbingState = () => {
+  if (climbTimeout.value) {
+    clearTimeout(climbTimeout.value)
+    climbTimeout.value = null
+  }
+  isClimbing.value = false
+  message.info('爬塔状态已重置')
 }
 
 const getTowerInfo = async () => {
@@ -149,36 +190,19 @@ const getTowerInfo = async () => {
 
   try {
     const tokenId = tokenStore.selectedToken.id
-    console.log('🗼 getTowerInfo: 开始获取塔信息, tokenId:', tokenId)
-
     // 检查WebSocket连接状态
     const wsStatus = tokenStore.getWebSocketStatus(tokenId)
-    console.log('🗼 getTowerInfo: WebSocket状态:', wsStatus)
-    
+
     if (wsStatus !== 'connected') {
-      console.warn('🗼 getTowerInfo: WebSocket未连接，无法获取数据')
       return
     }
-
     // 首先获取角色信息，这包含了塔的数据
-    console.log('🗼 getTowerInfo: 正在请求角色信息...')
     const roleResult = tokenStore.sendMessage(tokenId, 'role_getroleinfo')
-    console.log('🗼 getTowerInfo: 角色信息请求结果:', roleResult)
-
     // 直接请求塔信息
-    console.log('🗼 getTowerInfo: 正在请求塔信息...')
     const towerResult = tokenStore.sendMessage(tokenId, 'tower_getinfo')
-    console.log('🗼 getTowerInfo: 塔信息请求结果:', towerResult)
-
-    // 检查当前gameData状态
-    console.log('🗼 getTowerInfo: 当前gameData:', tokenStore.gameData)
-    console.log('🗼 getTowerInfo: 当前roleInfo:', tokenStore.gameData?.roleInfo)
-    console.log('🗼 getTowerInfo: 当前tower数据:', tokenStore.gameData?.roleInfo?.role?.tower)
-
     if (!roleResult && !towerResult) {
       console.error('🗼 getTowerInfo: 所有请求都失败了')
     }
-
   } catch (error) {
     console.error('🗼 getTowerInfo: 获取塔信息失败:', error)
   }
@@ -218,26 +242,47 @@ watch(() => tokenStore.selectedToken, (newToken, oldToken) => {
   }
 })
 
+// 监听爬塔结果
+watch(() => tokenStore.gameData.towerResult, (newResult, oldResult) => {
+  if (newResult && newResult.timestamp !== oldResult?.timestamp) {
+    console.log('🗼 收到新的爬塔结果:', newResult)
+
+    // 显示爬塔结果消息
+    if (newResult.success) {
+      message.success('咸将塔挑战成功！')
+
+      if (newResult.autoReward) {
+        setTimeout(() => {
+          message.success(`自动领取第${newResult.rewardFloor}层奖励`)
+        }, 1000)
+      }
+    } else {
+      message.error('咸将塔挑战失败')
+    }
+
+    // 重置爬塔状态
+    setTimeout(() => {
+      console.log('🗼 爬塔结果处理完成，重置状态')
+      if (climbTimeout.value) {
+        clearTimeout(climbTimeout.value)
+        climbTimeout.value = null
+      }
+      isClimbing.value = false
+    }, 2000)
+  }
+}, { deep: true })
+
 // 生命周期
 onMounted(() => {
-  console.log('🗼 TowerStatus 组件已挂载')
-  console.log('🗼 当前选中Token:', tokenStore.selectedToken?.name)
-  console.log('🗼 当前选中Token ID:', tokenStore.selectedToken?.id)
-  console.log('🗼 当前WebSocket状态:', wsStatus.value)
-  console.log('🗼 当前游戏数据:', tokenStore.gameData)
-  console.log('🗼 当前roleInfo:', tokenStore.gameData?.roleInfo)
-  console.log('🗼 当前tower数据:', tokenStore.gameData?.roleInfo?.role?.tower)
+
 
   // 检查WebSocket客户端
   if (tokenStore.selectedToken) {
     const client = tokenStore.getWebSocketClient(tokenStore.selectedToken.id)
-    console.log('🗼 WebSocket客户端:', client)
-    console.log('🗼 WebSocket客户端状态:', client ? 'exists' : 'null')
   }
 
   // 组件挂载时获取塔信息
   if (tokenStore.selectedToken && wsStatus.value === 'connected') {
-    console.log('🗼 条件满足，开始获取塔信息')
     getTowerInfo()
   } else if (!tokenStore.selectedToken) {
     console.log('🗼 没有选中的Token，无法获取塔信息')
@@ -250,7 +295,7 @@ onMounted(() => {
 <style scoped lang="scss">
 
 .tower-status-card {
-  background: white;
+  background: var(--bg-primary);
   border-radius: var(--border-radius-xl);
   padding: var(--spacing-lg);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -346,6 +391,9 @@ onMounted(() => {
 
 .card-actions {
   margin-top: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
 
@@ -372,6 +420,24 @@ onMounted(() => {
     background: var(--bg-secondary);
     color: var(--text-tertiary);
     cursor: not-allowed;
+  }
+}
+
+.reset-button {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid var(--warning-color);
+  border-radius: var(--border-radius-small);
+  background: transparent;
+  color: var(--warning-color);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  &:hover {
+    background: var(--warning-color);
+    color: white;
   }
 }
 

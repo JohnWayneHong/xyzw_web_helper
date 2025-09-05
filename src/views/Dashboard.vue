@@ -64,6 +64,9 @@
         </div>
 
         <div class="nav-user">
+          <!-- 主题切换按钮 -->
+          <ThemeToggle />
+          
           <n-dropdown
             :options="userMenuOptions"
             @select="handleUserAction"
@@ -101,7 +104,7 @@
               </n-button>
               <n-button
                 size="large"
-                @click="router.push('/tokens?force=true')"
+                @click="handleManageTokens"
               >
                 管理Token
               </n-button>
@@ -222,6 +225,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useTokenStore } from '@/stores/tokenStore'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import {
   Home,
   PersonCircle,
@@ -366,13 +370,30 @@ const handleUserAction = (key) => {
   }
 }
 
+const handleManageTokens = () => {
+  console.log('🔘 点击管理Token按钮')
+  console.log('📊 当前Token状态:', {
+    hasTokens: tokenStore.hasTokens,
+    selectedToken: tokenStore.selectedToken?.name,
+    tokenCount: tokenStore.gameTokens.length
+  })
+  
+  try {
+    router.push('/tokens')
+    console.log('✅ 成功导航到 /tokens')
+  } catch (error) {
+    console.error('❌ 导航失败:', error)
+    message.error('导航到Token管理页面失败')
+  }
+}
+
 const handleQuickAction = (action) => {
   switch (action.action) {
     case 'game-features':
       router.push('/game-features')
       break
     case 'add-token':
-      router.push('/tokens')
+      handleManageTokens()
       break
     case 'execute-tasks':
       router.push('/game-features')
@@ -462,7 +483,7 @@ onMounted(async () => {
 
 // 导航栏
 .dashboard-nav {
-  background: white;
+  background: var(--bg-primary);
   border-bottom: 1px solid var(--border-light);
   padding: 0 var(--spacing-lg);
   position: sticky;
@@ -526,6 +547,9 @@ onMounted(async () => {
 
 .nav-user {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
 }
 
 .user-info {
@@ -604,7 +628,7 @@ onMounted(async () => {
 }
 
 .stat-card {
-  background: white;
+  background: var(--bg-primary);
   border-radius: var(--border-radius-large);
   padding: var(--spacing-lg);
   box-shadow: var(--shadow-light);
@@ -672,7 +696,7 @@ onMounted(async () => {
 }
 
 .action-card {
-  background: white;
+  background: var(--bg-primary);
   border-radius: var(--border-radius-large);
   padding: var(--spacing-lg);
   box-shadow: var(--shadow-light);
@@ -714,7 +738,7 @@ onMounted(async () => {
 
 // 最近活动区域
 .recent-activity-section {
-  background: white;
+  background: var(--bg-primary);
   border-radius: var(--border-radius-large);
   padding: var(--spacing-xl);
   box-shadow: var(--shadow-light);
