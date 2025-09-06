@@ -158,8 +158,8 @@ export function registerDefaultCommands(reg) {
     .register("tower_claimreward")
 
     // 队伍相关
-    .register("presetteam_getinfo")
-    .register("presetteam_getinfo")
+    // .register("presetteam_getinfo")
+    // .register("presetteam_getinfo")
     .register("presetteam_setteam")
     .register("presetteam_saveteam", { teamId: 1 })
     .register("role_gettargetteam")

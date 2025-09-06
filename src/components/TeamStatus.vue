@@ -218,13 +218,19 @@ const getTeamInfoWithCache = async (force = false) => {
     if (cached) return cached
   }
 
+  // 直接返回缓存数据或空值，不发送命令
+  // 保留loading状态逻辑以维持UI一致性
   loading.value = true
   try {
-    const result = await executeGameCommand(tokenId, 'presetteam_getinfo', {}, '获取阵容信息')
-    tokenStore.$patch((state) => {
-      state.gameData = { ...(state.gameData ?? {}), presetTeam: result }
-    })
-    return result?.presetTeamInfo ?? null
+    // 注释掉实际发送命令的代码，直接使用缓存或空数据
+    // const result = await executeGameCommand(tokenId, 'presetteam_getinfo', {}, '获取阵容信息')
+    // tokenStore.$patch((state) => {
+    //   state.gameData = { ...(state.gameData ?? {}), presetTeam: result }
+    // })
+    // return result?.presetTeamInfo ?? null
+    
+    // 直接返回现有缓存数据
+    return tokenStore.gameData?.presetTeam?.presetTeamInfo ?? null
   } catch (error) {
     console.error('获取阵容信息失败:', error)
     return null

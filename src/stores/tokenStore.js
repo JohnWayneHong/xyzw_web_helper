@@ -536,7 +536,9 @@ export const useTokenStore = defineStore('tokens', () => {
       }
 
       // 使用固定的WebSocket基础地址，将token带入占位符
-      const baseWsUrl = 'wss://xxz-xyzw.hortorgames.com/agent?p=%s&e=x&lang=chinese'
+      // const baseWsUrl = 'wss://xxz-xyzw.hortorgames.com/agent?p=%s&e=x&lang=chinese'
+      const baseWsUrl = 'ws://47.112.97.95:8001/agent?p=%s&e=x&lang=chinese'
+      
       const wsUrl = customWsUrl || baseWsUrl.replace('%s', encodeURIComponent(actualToken))
 
       console.log(`🔗 创建WebSocket连接:`, wsUrl)
