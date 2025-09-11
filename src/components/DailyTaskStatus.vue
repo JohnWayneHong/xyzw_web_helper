@@ -477,24 +477,24 @@ const switchToFormationIfNeeded = async (tokenId, targetFormation, formationName
     const cachedTeamInfo = tokenStore.gameData?.presetTeam?.presetTeamInfo
     let currentFormation = cachedTeamInfo?.useTeamId
 
-    if (currentFormation) {
-      logFn(`从缓存获取当前阵容: ${currentFormation}`)
-    } else {
-      // 缓存中没有数据，从服务器获取
-      logFn(`缓存中无阵容信息，从服务器获取...`)
-      const teamInfo = await executeGameCommand(tokenId, 'presetteam_getinfo', {}, '获取阵容信息')
-      currentFormation = teamInfo?.presetTeamInfo?.useTeamId
-      logFn(`从服务器获取当前阵容: ${currentFormation}`)
-    }
+    // if (currentFormation) {
+    //   logFn(`从缓存获取当前阵容: ${currentFormation}`)
+    // } else {
+    //   // 缓存中没有数据，从服务器获取
+    //   logFn(`缓存中无阵容信息，从服务器获取...`)
+    //   const teamInfo = await executeGameCommand(tokenId, 'presetteam_getinfo', {}, '获取阵容信息')
+    //   currentFormation = teamInfo?.presetTeamInfo?.useTeamId
+    //   logFn(`从服务器获取当前阵容: ${currentFormation}`)
+    // }
 
-    if (currentFormation === targetFormation) {
-      logFn(`当前已是${formationName}${targetFormation}，无需切换`, 'success')
-      return false // 不需要切换
-    }
+    // if (currentFormation === targetFormation) {
+    //   logFn(`当前已是${formationName}${targetFormation}，无需切换`, 'success')
+    //   return false // 不需要切换
+    // }
 
-    logFn(`当前阵容: ${currentFormation}, 目标阵容: ${targetFormation}，开始切换...`)
-    await executeGameCommand(tokenId, 'presetteam_saveteam',
-      { teamId: targetFormation }, `切换到${formationName}${targetFormation}`)
+    // logFn(`当前阵容: ${currentFormation}, 目标阵容: ${targetFormation}，开始切换...`)
+    // await executeGameCommand(tokenId, 'presetteam_saveteam',
+    //   { teamId: targetFormation }, `切换到${formationName}${targetFormation}`)
     
     logFn(`成功切换到${formationName}${targetFormation}`, 'success')
     return true // 已切换
@@ -631,7 +631,7 @@ const executeDailyTasks = async (roleInfoResp, logFn, progressFn) => {
         logFn('开始竞技场战斗流程')
 
         // 智能切换到竞技场阵容
-        await switchToFormationIfNeeded(tokenId, settings.arenaFormation, '竞技场阵容', logFn)
+        // await switchToFormationIfNeeded(tokenId, settings.arenaFormation, '竞技场阵容', logFn)
 
         // 开始竞技场
         await executeGameCommand(tokenId, 'arena_startarea', {}, '开始竞技场')
