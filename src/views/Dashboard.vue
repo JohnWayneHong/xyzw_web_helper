@@ -258,6 +258,7 @@ const currentDate = computed(() => {
   })
 })
 
+
 const statistics = computed(() => [
   {
     id: 1,
@@ -371,16 +372,16 @@ const handleUserAction = (key) => {
 }
 
 const handleManageTokens = () => {
-  console.log('🔘 点击管理Token按钮')
-  console.log('📊 当前Token状态:', {
+  // 降噪
+  /* 当前Token状态:
     hasTokens: tokenStore.hasTokens,
     selectedToken: tokenStore.selectedToken?.name,
     tokenCount: tokenStore.gameTokens.length
-  })
+  */
   
   try {
     router.push('/tokens')
-    console.log('✅ 成功导航到 /tokens')
+    // 降噪
   } catch (error) {
     console.error('❌ 导航失败:', error)
     message.error('导航到Token管理页面失败')
@@ -615,6 +616,7 @@ onMounted(async () => {
   display: flex;
   gap: var(--spacing-md);
 }
+
 
 // 统计区域
 .stats-section {

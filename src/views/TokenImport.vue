@@ -281,12 +281,27 @@
               <div class="token-info">
                 <h3 class="token-name">
                   {{ token.name }}
+                  <!-- 连接状态指示器 -->
+                  <span
+                    class="connection-indicator"
+                    :class="{
+                      'connected': getConnectionStatus(token.id) === 'connected',
+                      'connecting': getConnectionStatus(token.id) === 'connecting',
+                      'disconnected': getConnectionStatus(token.id) === 'disconnected' || !getConnectionStatus(token.id),
+                      'error': getConnectionStatus(token.id) === 'error'
+                    }"
+                    :title="getConnectionStatusText(token.id)"
+                  ></span>
                 </h3>
                 <div class="token-meta">
                   <span
                     v-if="token.server"
                     class="meta-item"
                   >{{ token.server }}</span>
+                  <!-- 连接状态文字 -->
+                  <span class="connection-status">
+                    {{ getConnectionStatusText(token.id) }}
+                  </span>
                 </div>
               </div>
 
@@ -323,7 +338,6 @@
 
                 <div class="connection-actions">
                   <n-button
-                    v-if="token.sourceUrl"
                     size="small"
                     type="default"
                     :loading="refreshingTokens.has(token.id)"
@@ -332,15 +346,7 @@
                     <template #icon>
                       <n-icon><Refresh /></n-icon>
                     </template>
-                    刷新
-                  </n-button>
-                  
-                  <n-button
-                    size="small"
-                    :type="getConnectionStatus(token.id) === 'connected' ? 'warning' : 'primary'"
-                    @click.stop="toggleConnection(token)"
-                  >
-                    {{ getConnectionStatus(token.id) === 'connected' ? '断开' : '连接' }}
+                    {{ token.sourceUrl ? '刷新' : '重新获取' }}
                   </n-button>
                 </div>
               </div>
@@ -355,6 +361,37 @@
                   <span class="timestamp-value">{{ formatTime(token.lastUsed) }}</span>
                 </div>
               </div>
+
+              <!-- 存储类型信息 -->
+              <div class="storage-info">
+                <div class="storage-item">
+                  <span class="storage-label">存储类型：</span>
+                  <n-tag
+                    size="small"
+                    :type="token.importMethod === 'url' ? 'success' : 'warning'"
+                  >
+                    {{ token.importMethod === 'url' ? '长期有效' : '临时存储' }}
+                  </n-tag>
+                </div>
+                
+                <!-- 升级选项（仅对临时存储的token显示） -->
+                <div 
+                  v-if="token.importMethod !== 'url'"
+                  class="storage-upgrade"
+                >
+                  <n-button
+                    size="tiny"
+                    type="success"
+                    ghost
+                    @click.stop="upgradeTokenToPermanent(token)"
+                  >
+                    <template #icon>
+                      <n-icon><Star /></n-icon>
+                    </template>
+                    升级为长期有效
+                  </n-button>
+                </div>
+              </div>
             </div>
 
             <div
@@ -363,9 +400,14 @@
             >
               <n-button
                 type="primary"
+                size="large"
                 block
-                @click="goToDashboard"
+                :loading="connectingTokens.has(token.id)"
+                @click="startTaskManagement(token)"
               >
+                <template #icon>
+                  <n-icon><Home /></n-icon>
+                </template>
                 开始任务管理
               </n-button>
             </div>
@@ -437,7 +479,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, h } from 'vue'
+import { ref, reactive, onMounted, h, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage, useDialog, NIcon } from 'naive-ui'
 import { useTokenStore } from '@/stores/tokenStore'
@@ -450,12 +492,24 @@ import {
   Key,
   Refresh,
   Home,
+  Star,
   Create,
   Copy,
   SyncCircle,
   Link,
-  TrashBin
+  TrashBin,
+  Close
 } from '@vicons/ionicons5'
+
+// 接收路由参数
+const props = defineProps({
+  token: String,
+  name: String,
+  server: String,
+  wsUrl: String,
+  api: String,
+  auto: Boolean
+})
 
 const router = useRouter()
 const message = useMessage()
@@ -472,6 +526,7 @@ const editFormRef = ref(null)
 const editingToken = ref(null)
 const importMethod = ref('manual')
 const refreshingTokens = ref(new Set())
+const connectingTokens = ref(new Set())
 
 // 导入表单
 const importForm = reactive({
@@ -553,7 +608,7 @@ const handleImport = async () => {
       message.success(result.message)
       // 显示token详情信息（如果有）
       if (result.details) {
-        console.log('Token导入详情:', result.details)
+        // 降噪
       }
       resetImportForm()
       showImportForm.value = false
@@ -635,7 +690,7 @@ const handleUrlImport = async () => {
       message.success(result.message)
       // 显示token详情信息（如果有）
       if (result.details) {
-        console.log('URL Token导入详情:', result.details)
+        // 降噪
       }
       resetUrlForm()
       showImportForm.value = false
@@ -659,70 +714,118 @@ const handleUrlImport = async () => {
 
 // 刷新Token
 const refreshToken = async (token) => {
-  if (!token.sourceUrl) {
-    message.warning('该Token未配置刷新地址')
-    return
-  }
-
   refreshingTokens.value.add(token.id)
-  
+
   try {
-    // 使用与导入相同的跨域处理逻辑
-    let response
-    
-    const isLocalUrl = token.sourceUrl.startsWith(window.location.origin) || 
-                      token.sourceUrl.startsWith('/') ||
-                      token.sourceUrl.startsWith('http://localhost') ||
-                      token.sourceUrl.startsWith('http://127.0.0.1')
-    
-    if (isLocalUrl) {
-      response = await fetch(token.sourceUrl)
-    } else {
-      try {
-        response = await fetch(token.sourceUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-          mode: 'cors'
-        })
-      } catch (corsError) {
-        throw new Error(`跨域请求被阻止。请确保目标服务器支持CORS。错误详情: ${corsError.message}`)
+    if (token.sourceUrl) {
+      // 有源URL的token - 从URL重新获取
+      let response
+
+      const isLocalUrl = token.sourceUrl.startsWith(window.location.origin) ||
+                        token.sourceUrl.startsWith('/') ||
+                        token.sourceUrl.startsWith('http://localhost') ||
+                        token.sourceUrl.startsWith('http://127.0.0.1')
+
+      if (isLocalUrl) {
+        response = await fetch(token.sourceUrl)
+      } else {
+        try {
+          response = await fetch(token.sourceUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+            },
+            mode: 'cors'
+          })
+        } catch (corsError) {
+          throw new Error(`跨域请求被阻止。请确保目标服务器支持CORS。错误详情: ${corsError.message}`)
+        }
       }
-    }
 
-    if (!response.ok) {
-      throw new Error(`请求失败: ${response.status} ${response.statusText}`)
-    }
-    
-    const data = await response.json()
-    
-    if (!data.token) {
-      throw new Error('返回数据中未找到token字段')
-    }
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status} ${response.statusText}`)
+      }
 
-    // 更新token信息
-    tokenStore.updateToken(token.id, {
-      token: data.token,
-      server: data.server || token.server,
-      lastRefreshed: Date.now()
-    })
+      const data = await response.json()
+
+      if (!data.token) {
+        throw new Error('返回数据中未找到token字段')
+      }
+
+      // 更新token信息
+      tokenStore.updateToken(token.id, {
+        token: data.token,
+        server: data.server || token.server,
+        lastRefreshed: Date.now()
+      })
+
+      message.success('Token刷新成功')
+    } else {
+      // 没有源URL的token - 提示用户手动处理
+      dialog.info({
+        title: '重新获取Token',
+        content: `Token "${token.name}" 是手动导入的，没有配置自动刷新地址。
+
+请选择以下操作：
+1. 重新手动导入新的Token
+2. 尝试重新连接现有Token`,
+        positiveText: '重新导入',
+        negativeText: '重新连接',
+        onPositiveClick: () => {
+          showImportForm.value = true
+          importMethod.value = 'manual'
+          importForm.name = token.name
+          importForm.server = token.server
+          importForm.wsUrl = token.wsUrl
+        },
+        onNegativeClick: () => {
+          // 断开现有连接
+          if (tokenStore.getWebSocketStatus(token.id) === 'connected') {
+            tokenStore.closeWebSocketConnection(token.id)
+          }
+
+          // 尝试重新连接
+          setTimeout(() => {
+            tokenStore.createWebSocketConnection(token.id, token.token, token.wsUrl)
+            message.info('正在尝试重新连接...')
+          }, 500)
+        }
+      })
+      return
+    }
 
     // 如果当前token有连接，需要重新连接
     if (tokenStore.getWebSocketStatus(token.id) === 'connected') {
       tokenStore.closeWebSocketConnection(token.id)
       setTimeout(() => {
-        tokenStore.createWebSocketConnection(token.id, data.token, token.wsUrl)
+        tokenStore.createWebSocketConnection(token.id, token.token, token.wsUrl)
       }, 500)
     }
 
-    message.success('Token刷新成功')
   } catch (error) {
     console.error('刷新Token失败:', error)
     message.error(error.message || 'Token刷新失败')
   } finally {
     refreshingTokens.value.delete(token.id)
   }
+}
+
+// 升级Token为长期有效
+const upgradeTokenToPermanent = (token) => {
+  dialog.warning({
+    title: '升级为长期有效',
+    content: `确认要将Token "${token.name}" 升级为长期有效吗？升级后该Token将不会因24小时未使用而被自动清理。`,
+    positiveText: '确认升级',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const success = tokenStore.upgradeTokenToPermanent(token.id)
+      if (success) {
+        message.success(`Token "${token.name}" 已升级为长期有效！`)
+      } else {
+        message.error('升级失败，该Token可能已经是长期有效状态')
+      }
+    }
+  })
 }
 
 const resetImportForm = () => {
@@ -737,9 +840,38 @@ const resetUrlForm = () => {
   })
 }
 
-const selectToken = (token) => {
-  tokenStore.selectToken(token.id)
-  message.success(`已选择：${token.name}`)
+const selectToken = (token, forceReconnect = false) => {
+  const isAlreadySelected = tokenStore.selectedTokenId === token.id
+  const connectionStatus = getConnectionStatus(token.id)
+
+  // 降噪日志已移除
+
+  // 如果已经选中且已连接，不执行任何操作
+  if (isAlreadySelected && connectionStatus === 'connected' && !forceReconnect) {
+    message.info(`${token.name} 已选中且已连接`)
+    return
+  }
+
+  // 如果已经选中但正在连接，也不执行操作
+  if (isAlreadySelected && connectionStatus === 'connecting' && !forceReconnect) {
+    message.info(`${token.name} 正在连接中...`)
+    return
+  }
+
+  // 选择token（带智能连接判断）
+  const result = tokenStore.selectToken(token.id, forceReconnect)
+
+  if (result) {
+    if (forceReconnect) {
+      message.success(`强制重连：${token.name}`)
+    } else if (isAlreadySelected) {
+      message.success(`重新连接：${token.name}`)
+    } else {
+      message.success(`已选择：${token.name}`)
+    }
+  } else {
+    message.error(`选择Token失败：${token.name}`)
+  }
 }
 
 const getConnectionStatus = (tokenId) => {
@@ -748,64 +880,51 @@ const getConnectionStatus = (tokenId) => {
 
 const getConnectionStatusText = (tokenId) => {
   const status = getConnectionStatus(tokenId)
-  switch (status) {
-    case 'connected': return '已连接'
-    case 'connecting': return '连接中'
-    case 'error': return '连接错误'
-    default: return '未连接'
+  const statusMap = {
+    'connected': '已连接',
+    'connecting': '连接中...',
+    'disconnected': '已断开',
+    'error': '连接错误',
+    'disconnecting': '断开中...'
   }
+  return statusMap[status] || '未连接'
 }
 
-const toggleConnection = (token) => {
-  const status = getConnectionStatus(token.id)
 
-  if (status === 'connected') {
-    tokenStore.closeWebSocketConnection(token.id)
-    message.info('WebSocket连接已断开')
-  } else {
-    tokenStore.createWebSocketConnection(token.id, token.token, token.wsUrl)
-    message.success('正在建立WebSocket连接...')
-  }
-}
 
 const getTokenActions = (token) => {
   const actions = [
-    { 
-      label: '编辑', 
+    {
+      label: '编辑',
       key: 'edit',
       icon: () => h(NIcon, null, { default: () => h(Create) })
     },
-    { 
-      label: '复制Token', 
+    {
+      label: '复制Token',
       key: 'copy',
       icon: () => h(NIcon, null, { default: () => h(Copy) })
     }
   ]
 
-  // 根据Token类型添加不同的刷新选项
+  // 根据Token类型添加刷新选项
   if (token.importMethod === 'url' && token.sourceUrl) {
-    actions.push({ 
-      label: '从URL刷新', 
+    actions.push({
+      label: '从URL刷新',
       key: 'refresh-url',
       icon: () => h(NIcon, null, { default: () => h(SyncCircle) })
     })
   } else {
-    actions.push({ 
-      label: '刷新Token', 
+    actions.push({
+      label: '重新获取',
       key: 'refresh',
       icon: () => h(NIcon, null, { default: () => h(Refresh) })
     })
   }
 
   actions.push(
-    { 
-      label: '重新连接', 
-      key: 'reconnect',
-      icon: () => h(NIcon, null, { default: () => h(Link) })
-    },
     { type: 'divider' },
-    { 
-      label: '删除', 
+    {
+      label: '删除',
       key: 'delete',
       icon: () => h(NIcon, null, { default: () => h(TrashBin) }),
       props: { style: { color: '#e74c3c' } }
@@ -824,15 +943,12 @@ const handleTokenAction = async (key, token) => {
       copyToken(token)
       break
     case 'refresh':
-      // 手动添加的Token的刷新逻辑（暂时提示）
-      message.info('手动添加的Token暂不支持刷新，请重新导入')
+      // 重新获取Token
+      refreshToken(token)
       break
     case 'refresh-url':
       // URL获取的Token刷新
       refreshToken(token)
-      break
-    case 'reconnect':
-      reconnectToken(token)
       break
     case 'delete':
       deleteToken(token)
@@ -879,13 +995,6 @@ const copyToken = async (token) => {
   }
 }
 
-const reconnectToken = (token) => {
-  tokenStore.closeWebSocketConnection(token.id)
-  setTimeout(() => {
-    tokenStore.createWebSocketConnection(token.id, token.token, token.wsUrl)
-    message.success('正在重新连接...')
-  }, 500)
-}
 
 const deleteToken = (token) => {
   dialog.warning({
@@ -1004,12 +1113,187 @@ const goToDashboard = () => {
   router.push('/dashboard')
 }
 
+// 开始任务管理 - 包含连接探测
+const startTaskManagement = async (token) => {
+  connectingTokens.value.add(token.id)
+
+  try {
+    // 1. 检查当前连接状态
+    const connectionStatus = getConnectionStatus(token.id)
+
+    if (connectionStatus === 'connected') {
+      // 已连接，直接跳转
+      message.success(`${token.name} 已连接，进入任务管理`)
+      router.push('/dashboard')
+      return
+    }
+
+    // 2. 尝试建立连接
+    message.info(`正在探测 ${token.name} 的连接状态...`)
+
+    try {
+      // 使用token store的连接方法
+      await tokenStore.createWebSocketConnection(token.id, token.token, token.wsUrl)
+
+      // 等待连接建立（最多3秒）
+      let attempts = 0
+      const maxAttempts = 30 // 3秒，每100ms检查一次
+
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        const currentStatus = getConnectionStatus(token.id)
+
+        if (currentStatus === 'connected') {
+          message.success(`${token.name} 连接成功，进入任务管理`)
+          router.push('/dashboard')
+          return
+        }
+
+        if (currentStatus === 'error') {
+          throw new Error('连接失败')
+        }
+
+        attempts++
+      }
+
+      // 连接超时
+      throw new Error('连接超时')
+
+    } catch (connectionError) {
+      console.error('连接探测失败:', connectionError)
+
+      // 连接失败的处理
+      dialog.warning({
+        title: '连接失败',
+        content: `无法连接到 ${token.name}。可能的原因：
+
+1. Token已过期或无效
+2. 网络连接问题
+3. 服务器维护中
+
+是否要刷新Token后重试，还是直接进入离线模式？`,
+        positiveText: '刷新Token',
+        negativeText: '离线模式',
+        onPositiveClick: async () => {
+          try {
+            await refreshToken(token)
+            // 刷新成功后重试连接
+            setTimeout(() => startTaskManagement(token), 1000)
+          } catch (refreshError) {
+            message.error('Token刷新失败，请检查网络或手动重新导入')
+          }
+        },
+        onNegativeClick: () => {
+          message.info('进入离线模式，部分功能可能不可用')
+          router.push('/dashboard')
+        }
+      })
+    }
+
+  } finally {
+    connectingTokens.value.delete(token.id)
+  }
+}
+
+// URL参数处理函数
+const handleUrlParams = async () => {
+  // 检查是否通过URL传递了token参数
+  if (props.token || props.api) {
+    try {
+      isImporting.value = true
+      let tokenResult = null
+
+      if (props.api) {
+        // 通过API获取token
+        // 降噪
+        message.info('正在从API获取token...')
+
+        const response = await fetch(props.api, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          mode: 'cors'
+        })
+
+        if (!response.ok) {
+          throw new Error(`API请求失败: ${response.status} ${response.statusText}`)
+        }
+
+        const data = await response.json()
+
+        if (!data.token) {
+          throw new Error('API返回数据中未找到token字段')
+        }
+
+        // 使用API获取的token
+        tokenResult = tokenStore.importBase64Token(
+          props.name || data.name || '通过API导入的Token',
+          data.token,
+          {
+            server: props.server || data.server,
+            wsUrl: props.wsUrl,
+            sourceUrl: props.api,
+            importMethod: 'url'
+          }
+        )
+      } else if (props.token) {
+        // 直接使用URL中的token
+        // 降噪
+        message.info('正在导入token...')
+
+        tokenResult = tokenStore.importBase64Token(
+          props.name || '通过URL导入的Token',
+          props.token,
+          {
+            server: props.server,
+            wsUrl: props.wsUrl,
+            importMethod: 'url'
+          }
+        )
+      }
+
+      if (tokenResult && tokenResult.success) {
+        message.success(`Token "${tokenResult.tokenName}" 导入成功！`)
+
+        // 如果auto=true，自动选择并跳转到控制台
+        if (props.auto && tokenResult.token) {
+          tokenStore.selectToken(tokenResult.token.id)
+          message.success('正在跳转到控制台...')
+          setTimeout(() => {
+            router.push('/dashboard')
+          }, 1500)
+        } else {
+          // 清除URL参数，避免重复处理
+          router.replace('/tokens')
+        }
+      } else {
+        throw new Error(tokenResult?.message || 'Token导入失败')
+      }
+
+    } catch (error) {
+      console.error('URL参数处理失败:', error)
+      message.error(`导入失败: ${error.message}`)
+      // 清除URL参数
+      router.replace('/tokens')
+    } finally {
+      isImporting.value = false
+    }
+  }
+}
+
+// 监听路由参数变化
+watch(() => [props.token, props.api], handleUrlParams, { immediate: false })
+
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
   tokenStore.initTokenStore()
 
-  // 如果没有token，显示导入表单
-  if (!tokenStore.hasTokens) {
+  // 处理URL参数
+  await handleUrlParams()
+
+  // 如果没有token且没有URL参数，显示导入表单
+  if (!tokenStore.hasTokens && !props.token && !props.api) {
     showImportForm.value = true
   }
 })
@@ -1404,6 +1688,77 @@ onMounted(() => {
   padding-top: var(--spacing-md);
 }
 
+/* 连接状态指示器样式 */
+.connection-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: var(--spacing-xs);
+  position: relative;
+
+  &.connected {
+    background-color: #10b981; /* 绿色 - 已连接 */
+    animation: pulse-green 2s infinite;
+  }
+
+  &.connecting {
+    background-color: #f59e0b; /* 黄色 - 连接中 */
+    animation: pulse-yellow 1s infinite;
+  }
+
+  &.disconnected {
+    background-color: #6b7280; /* 灰色 - 已断开 */
+  }
+
+  &.error {
+    background-color: #ef4444; /* 红色 - 连接错误 */
+    animation: pulse-red 1s infinite;
+  }
+}
+
+.connection-status {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+
+  &.connected {
+    color: #10b981;
+    background-color: rgba(16, 185, 129, 0.1);
+  }
+
+  &.connecting {
+    color: #f59e0b;
+    background-color: rgba(245, 158, 11, 0.1);
+  }
+
+  &.disconnected {
+    color: #6b7280;
+    background-color: rgba(107, 114, 128, 0.1);
+  }
+
+  &.error {
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.1);
+  }
+}
+
+@keyframes pulse-green {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes pulse-yellow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .empty-state {
   display: flex;
   justify-content: center;
@@ -1442,5 +1797,35 @@ onMounted(() => {
   .token-timestamps {
     flex-direction: column;
   }
+
+  .storage-info {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+}
+
+/* 存储信息样式 */
+.storage-info {
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+}
+
+.storage-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.storage-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-medium);
+  min-width: 70px;
+}
+
+.storage-upgrade {
+  margin-top: var(--spacing-xs);
 }
 </style>

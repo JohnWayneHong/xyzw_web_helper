@@ -4,6 +4,7 @@
  */
 
 import { bonProtocol, g_utils } from './bonProtocol.js'
+import { wsLogger, gameLogger } from './logger.js'
 
 /** 生成 [min,max] 的随机整数 */
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
@@ -27,14 +28,10 @@ export class CommandRegistry {
       cmd,
       ack,
       seq,
-      code: 0,
-      rtt: randInt(0, 500),
       time: Date.now(),
       body: this.encoder?.bon?.encode
         ? this.encoder.bon.encode({ ...defaultBody, ...params })
-        : undefined,
-      c: undefined,
-      hint: undefined,
+        : { ...defaultBody, ...params },
     }))
     return this
   }
@@ -46,9 +43,7 @@ export class CommandRegistry {
       ack,
       seq,
       time: Date.now(),
-      body: undefined,
-      c: undefined,
-      hint: undefined,
+      body: {},
     }))
     return this
   }
@@ -169,6 +164,8 @@ export function registerDefaultCommands(reg) {
 
     // 梦魇相关
     .register("nightmare_getroleinfo")
+    // 活动/任务
+    .register("activity_get")
 }
 
 /**
@@ -181,7 +178,7 @@ export class XyzwWebSocketClient {
     this.enc = this.utils?.getEnc ? this.utils.getEnc("auto") : undefined
 
     this.socket = null
-    this.ack = 1
+    this.ack = 0
     this.seq = 0
     this.sendQueue = []
     this.sendQueueTimer = null
@@ -192,6 +189,7 @@ export class XyzwWebSocketClient {
     this.messageListener = null
     this.showMsg = false
     this.connected = false
+    this.isReconnecting = false // 重连状态标志
 
     this.promises = Object.create(null)
     this.registry = registerDefaultCommands(new CommandRegistry(this.utils, this.enc))
@@ -206,12 +204,12 @@ export class XyzwWebSocketClient {
 
   /** 初始化连接 */
   init() {
-    console.log(`🔗 连接: ${this.url.split('?')[0]}`)
+    wsLogger.info(`连接: ${this.url.split('?')[0]}`)
 
     this.socket = new WebSocket(this.url)
 
     this.socket.onopen = () => {
-      console.log(`✅ 连接成功`)
+      wsLogger.info('连接成功')
       this.connected = true
       // 启动心跳机制
       this._setupHeartbeat()
@@ -228,6 +226,8 @@ export class XyzwWebSocketClient {
         } else if (evt.data instanceof ArrayBuffer) {
           // 二进制数据需要自动检测并解码
           packet = this.utils?.parse ? this.utils.parse(evt.data, "auto") : evt.data
+
+          // 移除特定命令的控制台直出日志，统一用 wsLogger/gameLogger 控制
         } else if (evt.data instanceof Blob) {
           // 处理Blob数据
           // 收到Blob数据
@@ -238,20 +238,32 @@ export class XyzwWebSocketClient {
 
               // 处理消息体解码（ProtoMsg会自动解码）
               if (packet instanceof Object && packet.rawData !== undefined) {
-                // ProtoMsg消息
-              } else if (packet.body && packet.body instanceof Uint8Array) {
+                gameLogger.verbose('ProtoMsg Blob消息，使用rawData:', packet.rawData)
+              } else if (packet.body && this.shouldDecodeBody(packet.body)) {
                 try {
                   if (this.utils && this.utils.bon && this.utils.bon.decode) {
-                    const decodedBody = this.utils.bon.decode(packet.body)
-                    // 手动解码成功
-                    // 不修改packet.body，而是创建一个新的属性存储解码后的数据
-                    packet.decodedBody = decodedBody
+                    // 转换body数据为Uint8Array
+                    const bodyBytes = this.convertToUint8Array(packet.body)
+                    if (bodyBytes) {
+                      const decodedBody = this.utils.bon.decode(bodyBytes)
+                      gameLogger.debug('BON Blob解码成功:', packet.cmd, decodedBody)
+                      // 不修改packet.body，而是创建一个新的属性存储解码后的数据
+                      packet.decodedBody = decodedBody
+                    }
                   } else {
-                    // BON解码器不可用
+                    gameLogger.warn('BON解码器不可用 (Blob)')
                   }
                 } catch (error) {
-                  // 消息体解码失败
+                  gameLogger.error('BON Blob消息体解码失败:', error.message, packet.cmd)
                 }
+              }
+
+              // 更新 ack 为服务端最新的 seq（若存在）
+              const actualPacket = packet._raw || packet
+              const incomingSeq = (typeof actualPacket?.seq === 'number') ? actualPacket.seq :
+                                   (typeof packet?.seq === 'number') ? packet.seq : undefined
+              if (typeof incomingSeq === 'number' && incomingSeq >= 0) {
+                this.ack = incomingSeq
               }
 
               if (this.showMsg) {
@@ -267,34 +279,54 @@ export class XyzwWebSocketClient {
               this._handlePromiseResponse(packet)
 
             } catch (error) {
-              console.error('Blob解析失败:', error.message)
+              gameLogger.error('Blob解析失败:', error.message)
             }
           })
           return // 异步处理，直接返回
         } else {
-          console.warn('⚠️ 未知数据类型:', typeof evt.data, evt.data)
+          gameLogger.warn('未知数据类型:', typeof evt.data, evt.data)
           packet = evt.data
         }
 
         if (this.showMsg) {
-          console.log(`📨 收到消息:`, packet)
+          gameLogger.verbose('收到消息:', packet)
         }
 
         // 处理消息体解码（ProtoMsg会自动解码）
         if (packet instanceof Object && packet.rawData !== undefined) {
-          console.log('✅ ProtoMsg消息，使用rawData:', packet.rawData)
-        } else if (packet.body && packet.body instanceof Uint8Array) {
-          try {
-            if (this.utils && this.utils.bon && this.utils.bon.decode) {
-              const decodedBody = this.utils.bon.decode(packet.body)
-              // 手动解码成功
-              // 不修改packet.body，而是创建一个新的属性存储解码后的数据
-              packet.decodedBody = decodedBody
-            } else {
-              // BON解码器不可用
+          gameLogger.verbose('ProtoMsg消息，使用rawData:', packet.rawData)
+        } else {
+          // 处理可能存在_raw包装的情况
+          const actualPacket = packet._raw || packet
+
+          // 更新 ack 为服务端最新的 seq（若存在）
+          const incomingSeq = (typeof actualPacket.seq === 'number') ? actualPacket.seq :
+                               (typeof packet.seq === 'number') ? packet.seq : undefined
+          if (typeof incomingSeq === 'number' && incomingSeq >= 0) {
+            this.ack = incomingSeq
+          }
+
+          if (actualPacket.body && this.shouldDecodeBody(actualPacket.body)) {
+            try {
+              if (this.utils && this.utils.bon && this.utils.bon.decode) {
+                // 转换body数据为Uint8Array
+                const bodyBytes = this.convertToUint8Array(actualPacket.body)
+                if (bodyBytes) {
+                  const decodedBody = this.utils.bon.decode(bodyBytes)
+                  gameLogger.debug('BON解码成功:', actualPacket.cmd || packet.cmd, decodedBody)
+                  // 将解码后的数据存储到原始packet中
+                  packet.decodedBody = decodedBody
+                  // 如果有_raw结构，也存储到_raw中
+                  if (packet._raw) {
+                    packet._raw.decodedBody = decodedBody
+                  }
+                }
+              } else {
+                gameLogger.warn('BON解码器不可用')
+              }
+            } catch (error) {
+              gameLogger.error('BON消息体解码失败:', error.message, actualPacket.cmd || packet.cmd)
             }
-          } catch (error) {
-            // 消息体解码失败
           }
         }
 
@@ -307,13 +339,13 @@ export class XyzwWebSocketClient {
         this._handlePromiseResponse(packet)
 
       } catch (error) {
-        console.error(`消息处理失败:`, error.message)
+        gameLogger.error('消息处理失败:', error.message)
       }
     }
 
     this.socket.onclose = (evt) => {
-      console.log(`🔌 WebSocket 连接关闭:`, evt.code, evt.reason)
-      console.log(`🔍 关闭详情:`, {
+      wsLogger.info(`WebSocket 连接关闭: ${evt.code} ${evt.reason || ''}`)
+      wsLogger.debug('关闭详情:', {
         code: evt.code,
         reason: evt.reason || '未提供原因',
         wasClean: evt.wasClean,
@@ -325,7 +357,7 @@ export class XyzwWebSocketClient {
     }
 
     this.socket.onerror = (error) => {
-      console.error(`❌ WebSocket 错误:`, error)
+      wsLogger.error('WebSocket 错误:', error)
       this.connected = false
       this._clearTimers()
       if (this.onError) this.onError(error)
@@ -342,10 +374,82 @@ export class XyzwWebSocketClient {
     this.showMsg = !!val
   }
 
-  /** 重连 */
+  /** 判断是否需要解码body */
+  shouldDecodeBody(body) {
+    if (!body) return false
+
+    // Uint8Array或Array格式
+    if (body instanceof Uint8Array || Array.isArray(body)) {
+      return true
+    }
+
+    // 对象格式的数字数组（从图片中看到的格式）
+    if (typeof body === 'object' && body.constructor === Object) {
+      // 检查是否是数字键的对象（例如 {"0": 8, "1": 2, ...}）
+      const keys = Object.keys(body)
+      return keys.length > 0 && keys.every(key => !isNaN(parseInt(key)))
+    }
+
+    return false
+  }
+
+  /** 转换body为Uint8Array */
+  convertToUint8Array(body) {
+    if (!body) return null
+
+    if (body instanceof Uint8Array) {
+      return body
+    }
+
+    if (Array.isArray(body)) {
+      return new Uint8Array(body)
+    }
+
+    // 对象格式的数字数组转换为Uint8Array
+    if (typeof body === 'object' && body.constructor === Object) {
+      const keys = Object.keys(body).map(k => parseInt(k)).sort((a, b) => a - b)
+      if (keys.length > 0) {
+        const maxIndex = Math.max(...keys)
+        const arr = new Array(maxIndex + 1).fill(0)
+        for (const [key, value] of Object.entries(body)) {
+          const index = parseInt(key)
+          if (!isNaN(index) && typeof value === 'number') {
+            arr[index] = value
+          }
+        }
+        gameLogger.debug('转换对象格式body为Uint8Array:', arr.length, 'bytes')
+        return new Uint8Array(arr)
+      }
+    }
+
+    return null
+  }
+
+  /** 重连（防重复连接版本） */
   reconnect() {
+    // 防止重复重连
+    if (this.isReconnecting) {
+      wsLogger.debug('重连已在进行中，跳过此次重连请求')
+      return
+    }
+
+    this.isReconnecting = true
+    wsLogger.info('开始WebSocket重连...')
+
+    // 先断开现有连接
     this.disconnect()
-    setTimeout(() => this.init(), 1000)
+
+    // 延迟重连，避免过于频繁
+    setTimeout(() => {
+      try {
+        this.init()
+      } finally {
+        // 无论成功或失败都重置重连状态
+        setTimeout(() => {
+          this.isReconnecting = false
+        }, 2000) // 2秒后允许下次重连
+      }
+    }, 1000)
   }
 
   /** 断开连接 */
@@ -361,17 +465,27 @@ export class XyzwWebSocketClient {
   /** 发送消息 */
   send(cmd, params = {}, options = {}) {
     if (!this.connected) {
-      console.warn(`⚠️ WebSocket 未连接，消息已入队: ${cmd}`)
-      if (!this.dialogStatus) {
+      wsLogger.warn(`WebSocket 未连接，消息已入队: ${cmd}`)
+      // 防止频繁重连
+      if (!this.dialogStatus && !this.isReconnecting) {
         this.dialogStatus = true
+        wsLogger.info('自动触发重连...')
         this.reconnect()
         setTimeout(() => { this.dialogStatus = false }, 2000)
       }
     }
 
+    // 移除特定命令的控制台直出日志，统一用 wsLogger 控制
+
+    // 统一在入队时分配 seq，避免与 Promise 版本竞争导致重复
+    const assignedSeq = (options.seq !== undefined)
+      ? options.seq
+      : (cmd === 'heart_beat' ? 0 : ++this.seq)
+
     const task = {
       cmd,
       params,
+      seq: assignedSeq,
       respKey: options.respKey || cmd,
       sleep: options.sleep || 0,
       onSent: options.onSent
@@ -388,21 +502,21 @@ export class XyzwWebSocketClient {
         return reject(new Error("WebSocket 连接已关闭"))
       }
 
-      // 生成唯一的请求ID
-      const requestId = `${cmd}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      // 为此请求生成唯一的seq值
+      const requestSeq = ++this.seq
 
-      // 设置 Promise 状态
-      this.promises[requestId] = { resolve, reject, originalCmd: cmd }
+      // 设置 Promise 状态，使用seq作为键
+      this.promises[requestSeq] = { resolve, reject, originalCmd: cmd }
 
       // 超时处理
       const timer = setTimeout(() => {
-        delete this.promises[requestId]
+        delete this.promises[requestSeq]
         reject(new Error(`请求超时: ${cmd} (${timeoutMs}ms)`))
       }, timeoutMs)
 
-      // 发送消息
+      // 发送消息，直接传递seq
       this.send(cmd, params, {
-        respKey: requestId,
+        seq: requestSeq,
         onSent: () => {
           // 消息发送成功后，不要清除超时器，让它继续等待响应
           // 只有在收到响应或超时时才清除
@@ -413,7 +527,7 @@ export class XyzwWebSocketClient {
 
   /** 发送心跳 */
   sendHeartbeat() {
-    console.log('💓 发送心跳消息')
+    wsLogger.verbose('发送心跳消息')
     this.send("heart_beat", {}, { respKey: "_sys/ack" })
   }
 
@@ -444,7 +558,7 @@ export class XyzwWebSocketClient {
     // 延迟3秒后开始发送第一个心跳，避免连接刚建立就发送
     setTimeout(() => {
       if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
-        console.log('💓 开始发送首次心跳')
+        wsLogger.debug('开始发送首次心跳')
         this.sendHeartbeat()
       }
     }, 3000)
@@ -454,7 +568,7 @@ export class XyzwWebSocketClient {
       if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
         this.sendHeartbeat()
       } else {
-        console.log('⚠️ 心跳检查失败: 连接状态异常')
+        wsLogger.warn('心跳检查失败: 连接状态异常')
       }
     }, this.heartbeatInterval)
   }
@@ -471,22 +585,46 @@ export class XyzwWebSocketClient {
       if (!task) return
 
       try {
-        // 构建报文
-        const raw = this.registry.build(task.cmd, this.ack, this.seq, task.params)
-            if (task.cmd !== "heart_beat") this.seq++
+        // 直接使用任务指定的 seq（已在入队时分配）
+        const raw = this.registry.build(task.cmd, this.ack, task.seq, task.params)
+
+        // 发送前日志（仅标准五段）
+        if (raw && raw.cmd !== '_sys/ack') {
+          let bodyForLog
+          try {
+            if (raw.body instanceof Uint8Array || Array.isArray(raw.body)) {
+              bodyForLog = '[BON]'
+            } else if (raw.body && typeof raw.body === 'object' && raw.body.constructor === Object && Object.keys(raw.body).every(k => !isNaN(parseInt(k)))) {
+              bodyForLog = '[BON]'
+            } else {
+              bodyForLog = raw.body || {}
+            }
+          } catch {
+            bodyForLog = '[BODY]'
+          }
+          wsLogger.info('📤 发送报文', {
+            cmd: raw.cmd,
+            ack: raw.ack ?? 0,
+            seq: raw.seq ?? 0,
+            time: raw.time,
+            body: bodyForLog
+          })
+        }
+
+        // 自增逻辑已在入队时统一处理，这里不再修改 this.seq
 
         // 编码并发送
         const bin = this.registry.encodePacket(raw)
         this.socket?.send(bin)
 
         if (this.showMsg || task.cmd === "heart_beat") {
-          console.log(`📤 发送消息: ${task.cmd}`, task.params)
+          wsLogger.wsMessage('local', task.cmd, false)
           if (this.showMsg) {
-            console.log(`🔐 原始数据:`, raw)
-            console.log(`🚀 编码后数据:`, bin)
-            console.log(`🔧 编码类型:`, typeof bin, bin instanceof Uint8Array ? '✅ Uint8Array (加密)' : '❌ String (明文)')
+            wsLogger.verbose('原始数据:', raw)
+            wsLogger.verbose('编码后数据:', bin)
+            wsLogger.verbose('编码类型:', typeof bin, bin instanceof Uint8Array ? 'Uint8Array (加密)' : 'String (明文)')
             if (bin instanceof Uint8Array && bin.length > 0) {
-              console.log(`🎯 加密验证: 前8字节 [${Array.from(bin.slice(0, 8)).join(', ')}]`)
+              wsLogger.verbose(`加密验证: 前8字节 [${Array.from(bin.slice(0, 8)).join(', ')}]`)
             }
           }
         }
@@ -496,7 +634,7 @@ export class XyzwWebSocketClient {
           try {
             task.onSent(task.respKey, task.cmd)
           } catch (error) {
-            console.warn('发送回调执行失败:', error)
+            wsLogger.warn('发送回调执行失败:', error)
           }
         }
 
@@ -504,19 +642,39 @@ export class XyzwWebSocketClient {
         if (task.sleep) await sleep(task.sleep)
 
       } catch (error) {
-        console.error(`❌ 发送消息失败: ${task.cmd}`, error)
+        wsLogger.error(`发送消息失败: ${task.cmd}`, error)
       }
     }, 50)
   }
 
   /** 处理 Promise 响应 */
   _handlePromiseResponse(packet) {
+    // 优先使用resp字段进行响应匹配（新的正确方式）
+    if (packet.resp !== undefined && this.promises[packet.resp]) {
+      const promiseData = this.promises[packet.resp]
+      delete this.promises[packet.resp]
+
+      // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
+      const responseBody = packet.rawData !== undefined ? packet.rawData :
+                         packet.decodedBody !== undefined ? packet.decodedBody :
+                         packet.body
+
+      if (packet.code === 0 || packet.code === undefined) {
+        promiseData.resolve(responseBody || packet)
+      } else {
+        promiseData.reject(new Error(`服务器错误: ${packet.code} - ${packet.hint || '未知错误'}`))
+      }
+      return
+    }
+
+    // 兼容旧的基于cmd名称的匹配方式（保留为向后兼容）
     const cmd = packet.cmd
     if (!cmd) return
 
     // 命令到响应的映射 - 处理响应命令与原始命令不匹配的情况
     const responseToCommandMap = {
       // 1:1 响应映射（优先级高）
+      'studyresp':'study_startgame',
       'role_getroleinforesp': 'role_getroleinfo',
       'hero_recruitresp': 'hero_recruit',
       'friend_batchresp': 'friend_batch',
@@ -531,7 +689,6 @@ export class XyzwWebSocketClient {
       'fight_startareaarenaresp': 'fight_startareaarena',
       'arena_startarearesp': 'arena_startarea',
       'arena_getareatargetresp': 'arena_getareatarget',
-      'presetteam_getinforesp': 'presetteam_getinfo',
       'presetteam_saveteamresp': 'presetteam_saveteam',
       'presetteam_getinforesp': 'presetteam_getinfo',
       'mail_claimallattachmentresp': 'mail_claimallattachment',
@@ -558,7 +715,7 @@ export class XyzwWebSocketClient {
       originalCmds = [originalCmds] // 转换为数组
     }
 
-    // 查找对应的 Promise - 遍历所有等待中的 Promise
+    // 查找对应的 Promise - 遍历所有等待中的 Promise（向后兼容）
     for (const [requestId, promiseData] of Object.entries(this.promises)) {
       // 检查 Promise 是否匹配当前响应的任一原始命令
       if (originalCmds.includes(promiseData.originalCmd)) {

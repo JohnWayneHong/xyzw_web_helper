@@ -1,16 +1,14 @@
 <template>
-  <div class="tower-status-card">
+  <div class="status-card tower-status">
     <div class="card-header">
-      <div class="header-info">
-        <img
-          src="/icons/1733492491706148.png"
-          alt="爬塔图标"
-          class="tower-icon"
-        >
-        <div class="tower-info">
-          <h3>咸将塔</h3>
-          <p>一个不小心就过了</p>
-        </div>
+      <img
+        src="/icons/1733492491706148.png"
+        alt="爬塔图标"
+        class="status-icon"
+      >
+      <div class="status-info">
+        <h3>咸将塔</h3>
+        <p>一个不小心就过了</p>
       </div>
       <div class="energy-display">
         <img
@@ -161,7 +159,10 @@ const startTowerClimb = async () => {
   try {
     const tokenId = tokenStore.selectedToken.id
 
-    // 发送爬塔命令
+    // 发送爬塔命令（日志精简：不输出控制台）
+
+    // 实际请求体将会是: {"ack":0,"body":{},"cmd":"fight_starttower","seq":XX,"time":TIMESTAMP}
+
     await tokenStore.sendMessageWithPromise(tokenId, 'fight_starttower', {}, 10000)
 
     message.success('爬塔命令已发送')
@@ -251,10 +252,7 @@ const resetClimbingState = () => {
 }
 
 const getTowerInfo = async () => {
-  if (!tokenStore.selectedToken) {
-    console.warn('🗼 getTowerInfo: 没有选中的Token')
-    return
-  }
+  if (!tokenStore.selectedToken) { return }
 
   try {
     const tokenId = tokenStore.selectedToken.id
@@ -268,11 +266,9 @@ const getTowerInfo = async () => {
     const roleResult = tokenStore.sendMessage(tokenId, 'role_getroleinfo')
     // 直接请求塔信息
     const towerResult = tokenStore.sendMessage(tokenId, 'tower_getinfo')
-    if (!roleResult && !towerResult) {
-      console.error('🗼 getTowerInfo: 所有请求都失败了')
-    }
+    if (!roleResult && !towerResult) {}
   } catch (error) {
-    console.error('🗼 getTowerInfo: 获取塔信息失败:', error)
+    // 获取塔信息失败：静默，避免噪声
   }
 }
 
@@ -284,10 +280,7 @@ const wsStatus = computed(() => {
 
 // 监听WebSocket连接状态，连接成功后自动获取塔信息
 watch(wsStatus, (newStatus, oldStatus) => {
-  console.log(`🗼 WebSocket状态变化: ${oldStatus} -> ${newStatus}`)
-
   if (newStatus === 'connected' && oldStatus !== 'connected') {
-    console.log('🗼 WebSocket已连接，自动获取塔信息')
     // 延迟一点时间让WebSocket完全就绪
     setTimeout(() => {
       getTowerInfo()
@@ -298,7 +291,6 @@ watch(wsStatus, (newStatus, oldStatus) => {
 // 监听选中Token变化
 watch(() => tokenStore.selectedToken, (newToken, oldToken) => {
   if (newToken && newToken.id !== oldToken?.id) {
-    console.log('🗼 Token已切换，获取新的塔信息')
     // 检查WebSocket是否已连接
     const status = tokenStore.getWebSocketStatus(newToken.id)
     if (status === 'connected') {
@@ -310,8 +302,6 @@ watch(() => tokenStore.selectedToken, (newToken, oldToken) => {
 // 监听爬塔结果
 watch(() => tokenStore.gameData.towerResult, (newResult, oldResult) => {
   if (newResult && newResult.timestamp !== oldResult?.timestamp) {
-    console.log('🗼 收到新的爬塔结果:', newResult)
-
     // 显示爬塔结果消息
     if (newResult.success) {
       message.success('咸将塔挑战成功！')
@@ -327,7 +317,6 @@ watch(() => tokenStore.gameData.towerResult, (newResult, oldResult) => {
 
     // 重置爬塔状态
     setTimeout(() => {
-      console.log('🗼 爬塔结果处理完成，重置状态')
       if (climbTimeout.value) {
         clearTimeout(climbTimeout.value)
         climbTimeout.value = null
@@ -359,10 +348,6 @@ onMounted(() => {
   // 组件挂载时获取塔信息
   if (tokenStore.selectedToken && wsStatus.value === 'connected') {
     getTowerInfo()
-  } else if (!tokenStore.selectedToken) {
-    console.log('🗼 没有选中的Token，无法获取塔信息')
-  } else {
-    console.log('🗼 WebSocket未连接，等待连接后自动获取塔信息')
   }
 })
 </script>
@@ -372,49 +357,20 @@ onMounted(() => {
   background: var(--bg-primary);
   border-radius: var(--border-radius-xl);
   padding: var(--spacing-lg);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transition: all var(--transition-normal);
-  border-left: 4px solid #6366f1;
-
-  &:hover {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-    transform: translateY(-2px);
-  }
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--spacing-lg);
-}
-
-.header-info {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-}
-
-.tower-icon {
+.status-icon {
   width: 32px;
   height: 32px;
   object-fit: contain;
   flex-shrink: 0;
 }
 
-.tower-info {
-  h3 {
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-primary);
-    margin: 0 0 var(--spacing-xs) 0;
-  }
-
-  p {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    margin: 0;
-  }
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
 }
 
 .energy-display {
@@ -424,6 +380,7 @@ onMounted(() => {
   background: var(--bg-tertiary);
   padding: var(--spacing-xs) var(--spacing-sm);
   border-radius: var(--border-radius-medium);
+  margin-left: auto; // 使小鱼干展示靠右
 }
 
 .energy-icon {
@@ -441,8 +398,11 @@ onMounted(() => {
 .card-content {
   background: var(--bg-tertiary);
   border-radius: var(--border-radius-medium);
-  padding: var(--spacing-md);
-  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
+  flex: 1; // 占据可用空间，使上下分布更均衡
+  display: flex;
+  align-items: center; // 内容在中部更居中
 }
 
 .tower-floor {
@@ -464,10 +424,11 @@ onMounted(() => {
 }
 
 .card-actions {
-  margin-top: var(--spacing-lg);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+  margin-top: auto;
+  padding-top: var(--spacing-sm);
 }
 
 .climb-button {
