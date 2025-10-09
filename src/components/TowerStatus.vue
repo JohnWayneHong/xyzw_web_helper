@@ -41,12 +41,26 @@
         :disabled="!canClimb"
         @click="startTowerClimb"
       >
-        {{ isClimbing.value ? '爬塔中...' : '开始爬塔' }}
+        {{ isClimbing ? '爬塔中...' : '开始爬塔' }}
+      </button>
+      
+      <!-- 新增：自动爬塔按钮 -->
+      <button
+        :class="[
+          'auto-climb-button',
+          {
+            'active': autoClimbEnabled,
+            'disabled': !tokenStore.selectedToken
+          }
+        ]"
+        @click="toggleAutoClimb"
+      >
+        {{ autoClimbEnabled ? '停止自动爬塔' : '开始自动爬塔' }}
       </button>
 
       <!-- 调试用的重置按钮，只在开发环境显示 -->
       <button
-        v-if="isClimbing.value"
+        v-if="isClimbing"
         class="reset-button"
         @click="resetClimbingState"
       >
@@ -57,7 +71,7 @@
 </template>
 
 <script setup>
-import {computed, onMounted, ref, watch} from 'vue'
+import {computed, onMounted, onUnmounted, ref, watch} from 'vue'
 import {useTokenStore} from '@/stores/tokenStore'
 import {useMessage} from 'naive-ui'
 
@@ -69,6 +83,10 @@ const isClimbing = ref(false)
 const climbTimeout = ref(null) // 用于超时重置状态
 const lastClimbResult = ref(null) // 最后一次爬塔结果
 
+// 新增：自动爬塔控制
+const autoClimbEnabled = ref(false)
+const autoClimbInterval = ref(null)
+
 // 计算属性 - 从gameData中获取塔相关信息
 const roleInfo = computed(() => {
   const data = tokenStore.gameData?.roleInfo || null
@@ -77,7 +95,6 @@ const roleInfo = computed(() => {
 
 const currentFloor = computed(() => {
   const tower = roleInfo.value?.role?.tower
-
 
   if (!tower) {
     return "0 - 0"
@@ -96,7 +113,6 @@ const currentFloor = computed(() => {
 const towerEnergy = computed(() => {
   const tower = roleInfo.value?.role?.tower
 
-
   const energy = tower?.energy || 0
   return energy
 })
@@ -105,6 +121,14 @@ const canClimb = computed(() => {
   const hasEnergy = towerEnergy.value > 0
   const notClimbing = !isClimbing.value
   return hasEnergy && notClimbing
+})
+
+// 新增：自动爬塔能力检查
+const canAutoClimb = computed(() => {
+  const hasEnergy = towerEnergy.value > 0
+  const notClimbing = !isClimbing.value
+  const autoEnabled = autoClimbEnabled.value
+  return hasEnergy && notClimbing && autoEnabled
 })
 
 // 方法
@@ -167,9 +191,53 @@ const startTowerClimb = async () => {
     }
     isClimbing.value = false
   }
+}
 
-  // 注意：不要在这里设置 isClimbing.value = false
-  // 因为我们要等待延迟查询完成后再重置状态
+// 新增：切换自动爬塔模式
+const toggleAutoClimb = async () => {
+  if (!tokenStore.selectedToken) {
+    message.warning('请先选择Token')
+    return
+  }
+
+  // 切换自动爬塔状态
+  autoClimbEnabled.value = !autoClimbEnabled.value
+  
+  if (autoClimbEnabled.value) {
+    message.info('自动爬塔已启动')
+    // 开始自动爬塔循环
+    startAutoClimbLoop()
+  } else {
+    message.info('自动爬塔已停止')
+    // 停止自动爬塔循环
+    stopAutoClimbLoop()
+  }
+}
+
+// 新增：开始自动爬塔循环
+const startAutoClimbLoop = () => {
+  // 先清除现有的循环
+  stopAutoClimbLoop()
+  
+  // 设置新的循环，每3秒检查一次
+  autoClimbInterval.value = setInterval(async () => {
+    if (canAutoClimb.value) {
+      await startTowerClimb()
+    } else if (!canClimb.value && autoClimbEnabled.value) {
+      // 如果没有体力且自动爬塔开启，则停止
+      stopAutoClimbLoop()
+      autoClimbEnabled.value = false
+      message.warning('体力不足，自动爬塔已停止')
+    }
+  }, 3000)
+}
+
+// 新增：停止自动爬塔循环
+const stopAutoClimbLoop = () => {
+  if (autoClimbInterval.value) {
+    clearInterval(autoClimbInterval.value)
+    autoClimbInterval.value = null
+  }
 }
 
 // 重置爬塔状态的方法
@@ -207,9 +275,6 @@ const getTowerInfo = async () => {
     console.error('🗼 getTowerInfo: 获取塔信息失败:', error)
   }
 }
-
-
-
 
 // 监听WebSocket连接状态变化
 const wsStatus = computed(() => {
@@ -272,10 +337,20 @@ watch(() => tokenStore.gameData.towerResult, (newResult, oldResult) => {
   }
 }, { deep: true })
 
+// 新增：组件卸载时清理
+onUnmounted(() => {
+  // 清理自动爬塔循环
+  stopAutoClimbLoop()
+  
+  // 清理爬塔超时
+  if (climbTimeout.value) {
+    clearTimeout(climbTimeout.value)
+    climbTimeout.value = null
+  }
+})
+
 // 生命周期
 onMounted(() => {
-
-
   // 检查WebSocket客户端
   if (tokenStore.selectedToken) {
     const client = tokenStore.getWebSocketClient(tokenStore.selectedToken.id)
@@ -293,7 +368,6 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-
 .tower-status-card {
   background: var(--bg-primary);
   border-radius: var(--border-radius-xl);
@@ -396,7 +470,6 @@ onMounted(() => {
   gap: var(--spacing-sm);
 }
 
-
 .climb-button {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
@@ -420,6 +493,42 @@ onMounted(() => {
     background: var(--bg-secondary);
     color: var(--text-tertiary);
     cursor: not-allowed;
+  }
+}
+
+/* 新增：自动爬塔按钮样式 */
+.auto-climb-button {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border: none;
+  border-radius: var(--border-radius-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  &.active {
+    background: #10b981; /* 绿色表示激活状态 */
+    color: white;
+
+    &:hover {
+      background: #059669;
+    }
+  }
+
+  &.disabled {
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+    cursor: not-allowed;
+  }
+  
+  &:not(.active):not(.disabled) {
+    background: #f3f4f6;
+    color: var(--text-primary);
+    
+    &:hover {
+      background: #e5e7eb;
+    }
   }
 }
 
