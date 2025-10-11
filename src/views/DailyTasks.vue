@@ -306,22 +306,23 @@ const loadTeamDataWithConnection = async (tokenId, maxRetries = 3, retryDelay = 
       
       // WebSocket已连接，开始加载阵容数据
       // 降噪
-      const result = await tokenStore.sendMessageWithPromise(
-        tokenId, 
-        'presetteam_getinfo', 
-        {}, 
-        8000
-      )
+      // const result = await tokenStore.sendMessageWithPromise(
+      //   tokenId, 
+      //   'presetteam_getinfo', 
+      //   {}, 
+      //   8000
+      // )
       
-      if (result) {
-        // 更新到游戏数据缓存中
-        tokenStore.$patch((state) => {
-          state.gameData = { ...(state.gameData ?? {}), presetTeam: result }
-        })
-        // 降噪
-        message.success('阵容数据已更新')
-        return result
-      }
+      // if (result) {
+      //   // 更新到游戏数据缓存中
+      //   tokenStore.$patch((state) => {
+      //     state.gameData = { ...(state.gameData ?? {}), presetTeam: result }
+      //   })
+      //   // 降噪
+      //   message.success('阵容数据已更新')
+      //   return result
+      // }
+      message.success('阵容数据已更新')
       
     } catch (error) {
       console.error(`第${attempt}次尝试失败:`, error)

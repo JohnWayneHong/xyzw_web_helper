@@ -475,8 +475,8 @@ const getTodayBossId = () => {
 const switchToFormationIfNeeded = async (tokenId, targetFormation, formationName, logFn) => {
   try {
     // 首先尝试从本地缓存获取当前阵容信息
-    const cachedTeamInfo = tokenStore.gameData?.presetTeam?.presetTeamInfo
-    let currentFormation = cachedTeamInfo?.useTeamId
+    // const cachedTeamInfo = tokenStore.gameData?.presetTeam?.presetTeamInfo
+    // let currentFormation = cachedTeamInfo?.useTeamId
 
     // if (currentFormation) {
     //   logFn(`从缓存获取当前阵容: ${currentFormation}`)

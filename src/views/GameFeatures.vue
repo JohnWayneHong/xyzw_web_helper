@@ -272,7 +272,7 @@ const initializeGameData = async () => {
     // 获取初始化数据（静默）
     tokenStore.sendMessage(tokenId, 'role_getroleinfo')
     tokenStore.sendMessage(tokenId, 'tower_getinfo')
-    tokenStore.sendMessage(tokenId, 'presetteam_getinfo')
+    // tokenStore.sendMessage(tokenId, 'presetteam_getinfo')
   } catch (error) {
     // 静默处理初始化异常
   }
