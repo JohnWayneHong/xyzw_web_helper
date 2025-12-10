@@ -72,3 +72,12 @@ tmp/
 temp/
 
 .github
+
+# ... 原有的内容 ...
+
+# 刚刚添加的忽略规则
+components.d.ts
+auto-imports.d.ts
+src/auto-imports.d.ts
+typed-router.d.ts
+src/typed-router.d.ts
