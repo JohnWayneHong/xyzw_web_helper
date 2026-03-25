@@ -874,7 +874,7 @@ export const useTokenStore = defineStore('tokens', () => {
             // 6. 构建WebSocket URL
             // 使用固定的WebSocket基础地址，将token带入占位符
             // const baseWsUrl = 'wss://xxz-xyzw.hortorgames.com/agent?p=%s&e=x&lang=chinese'
-            const baseWsUrl = 'ws://47.112.97.95:8001/agent?p=%s&e=x&lang=chinese'
+            const baseWsUrl = 'ws://47.112.213.220:8001/agent?p=%s&e=x&lang=chinese'
             const wsUrl = customWsUrl || baseWsUrl.replace('%s', encodeURIComponent(actualToken))
 
             wsLogger.debug(`Token: ${actualToken.substring(0, 10)}...${actualToken.slice(-4)}`)
